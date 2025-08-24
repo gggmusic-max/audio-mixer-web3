@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>多轨音频控制器</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css" />
+  <style>
+    body { padding: 10px; }
+    .controls-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .track { border: 1px solid #ccc; padding: 8px; margin-bottom: 6px; border-radius: 6px; }
+    .url-input { display:none; width: 200px; }
+  </style>
+</head>
+<body>
+  <nav class="container-fluid">
+    <ul><li><strong>音频控制器</strong></li></ul>
+    <ul>
+      <li><button id="addTrackBtn">添加轨道</button></li>
+      <li><button id="saveConfigBtn">保存</button></li>
+      <li><button id="loadConfigBtn">加载</button></li>
+      <li><button id="toggleEditBtn">编辑模式</button></li>
+    </ul>
+  </nav>
+
+  <main class="container">
+    <!-- 主控制台 -->
+    <section class="track">
+      <div class="controls-row">
+        <label>主音量<input type="range" id="masterVolume" min="0" max="1" step="0.01" value="1"></label>
+        <button id="globalPlayBtn">全局播放</button>
+        <button id="globalPauseBtn">全局暂停</button>
+        <button id="globalStopBtn">全局停止</button>
+        <button id="recordBtn">录音</button>
+        <button id="fxBtn">FX</button>
+      </div>
+    </section>
+
+    <!-- 轨道容器 -->
+    <div id="trackContainer"></div>
+  </main>
+
+  <script>
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const masterGain = audioCtx.createGain();
+    masterGain.connect(audioCtx.destination);
+
+    document.getElementById("masterVolume").addEventListener("input", e => {
+      masterGain.gain.value = e.target.value;
+    });
+
+    const tracks = [];
+
+    function createTrack() {
+      const trackEl = document.createElement("div");
+      trackEl.className = "track";
+
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = "audio/*";
+      fileInput.multiple = true;
+
+      const urlBtn = document.createElement("button");
+      urlBtn.textContent = "网络素材";
+      const urlInput = document.createElement("input");
+      urlInput.type = "text";
+      urlInput.placeholder = "输入音频URL";
+      urlInput.className = "url-input";
+
+      const playBtn = document.createElement("button");
+      playBtn.textContent = "播放";
+
+      const stopBtn = document.createElement("button");
+      stopBtn.textContent = "停止";
+
+      const volumeInput = document.createElement("input");
+      volumeInput.type = "range";
+      volumeInput.min = 0;
+      volumeInput.max = 1;
+      volumeInput.step = 0.01;
+      volumeInput.value = 1;
+
+      const trackGain = audioCtx.createGain();
+      trackGain.connect(masterGain);
+
+      let buffers = [];
+      let sources = [];
+
+      // 本地文件加载
+      fileInput.addEventListener("change", async e => {
+        buffers = [];
+        for (let file of e.target.files) {
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            buffers.push(audioBuffer);
+          } catch (err) {
+            console.error("音频解码失败:", err);
+          }
+        }
+      });
+
+      // 网络音频加载
+      urlBtn.addEventListener("click", () => {
+        urlInput.style.display = urlInput.style.display === "none" ? "block" : "none";
+      });
+
+      urlInput.addEventListener("change", async () => {
+        const url = urlInput.value.trim();
+        if (!url) return;
+        try {
+          const res = await fetch(url);
+          const arrayBuffer = await res.arrayBuffer();
+          const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+          buffers.push(audioBuffer);
+          console.log("已加载网络音频:", url);
+        } catch (err) {
+          console.error("网络音频加载失败:", err);
+        }
+      });
+
+      // 播放
+      playBtn.addEventListener("click", async () => {
+        await audioCtx.resume(); // 确保能发声
+        if (!buffers.length) {
+          console.warn("没有音频可以播放");
+          return;
+        }
+        stopAll();
+        buffers.forEach((buffer, idx) => {
+          try {
+            const source = audioCtx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(trackGain);
+            source.start(audioCtx.currentTime + idx * 0.5); // 简单叠加测试
+            sources.push(source);
+          } catch (err) {
+            console.error("播放失败:", err);
+          }
+        });
+      });
+
+      // 停止
+      stopBtn.addEventListener("click", () => {
+        stopAll();
+      });
+
+      function stopAll(){
+        sources.forEach(s=>{ try { s.stop(); } catch(e){} });
+        sources = [];
+      }
+
+      volumeInput.addEventListener("input", e => {
+        trackGain.gain.value = e.target.value;
+      });
+
+      const row = document.createElement("div");
+      row.className = "controls-row";
+      row.append(fileInput, urlBtn, urlInput, playBtn, stopBtn, volumeInput);
+      trackEl.appendChild(row);
+
+      document.getElementById("trackContainer").appendChild(trackEl);
+      tracks.push({trackGain, buffers});
+    }
+
+    document.getElementById("addTrackBtn").addEventListener("click", createTrack);
+  </script>
+</body>
+</html>
